@@ -21,6 +21,7 @@ https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
 The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
 
 ```{r}
+#library(knitr)
 # check if a data folder exists; if not then create one
 if (!file.exists("data")) {dir.create("data")}
 
@@ -29,8 +30,12 @@ trainingUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training
 testingUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
 
 # download the files
-download.file(trainingUrl, destfile = "./data/pml-training.csv")
-download.file(testingUrl, destfile = "./data/pml-testing.csv")
+if (!file.exists("./data/pml-training.csv")){
+    download.file(trainingUrl, destfile = "./data/pml-training.csv")
+    }
+if (!file.exists("./data/pml-testing.csv")){
+    download.file(testingUrl, destfile = "./data/pml-testing.csv")
+    }
 
 # reading the data
 # thanks go to the forum contributors in the following thread:
@@ -39,9 +44,9 @@ train  <- read.csv("./data/pml-training.csv", header=TRUE, na.strings = c("", " 
 test  <- read.csv("./data/pml-testing.csv", header=TRUE, na.strings = c("", " ","NA"))
 ```
 
-## Cleaning and tidying the data
+## Cleaning the data
 
-A brief visual inspection of the column names reveals that the first seven columns are irrelevant for the modelling. All column names in both datasets are equal except the last column. We extract only the columns with 'accel' and 'gyros' in their names as primary measurements. 
+A brief visual inspection of the column names reveals that the first seven columns are irrelevant for the modelling. All column names in both datasets are equal except the last column. We extract only the columns with direct measurements ('accel', 'magnet' and 'gyros' in their names). Since columns with 'var' in their names contain only 'NA', they are also discarded.
 
 ```{r}
 namestrain <- colnames(train)
@@ -50,5 +55,52 @@ which(namestest!=namestrain)
 varind <- grepl('var',namestrain)
 accind <- grepl('acc',namestrain)
 gyroind <- grepl('gyro',namestrain)
-trainMeasured <- cbind(classe = train$classe,train[,(accind|gyroind)&!varind])
+magind <- grepl('magnet',namestrain)
+trainMeasured <- cbind(classe = train$classe,train[,(accind|gyroind|magind)&!varind])
+testMeasured <- cbind(pid = test$problem_id,test[,(accind|gyroind|magind)&!varind])
 names(trainMeasured)
+```
+
+## Model fitting
+Since the testing dataset includes only 20 observations, we can use the larger dataset to train and crossvalidate the model, whereas the smaller one will be used for the final verification only. We use two methods: decision trees and random forest with default parameters. 
+
+```{r}
+# split the cleaned testing data into training and cross validation
+library(caret)
+indTrain <- createDataPartition(y = trainMeasured$classe, p = 0.6, list = FALSE)
+training <- trainMeasured[indTrain, ]
+crossval <- trainMeasured[-indTrain, ]
+
+# fit a randomForest model 
+library(randomForest)
+rfmodel <- randomForest(classe ~ ., data = training) #, preProcess=c("center", "scale")
+rfmodel
+rfpredictions <- predict(rfmodel, crossval, type = "class")
+confusionMatrix(rfpredictions, crossval$classe)
+
+# decision tree model
+library(rpart)
+dtmodel <- rpart(classe ~ ., data=training, method = "class")
+dtmodel
+dtpredictions <- predict(dtmodel, crossval, type = "class")
+confusionMatrix(dtpredictions, crossval$classe)
+```
+The random forest model is clearly better (higher accuracy, smaller out of sample error) than the decision tree model. 
+
+Now we can verify it using the original test dataset:
+
+```{r}
+verif <- predict(rfmodel, testMeasured, type = "class")
+verif
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(verif)
+```
+All predicted values are correct.

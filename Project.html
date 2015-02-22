@@ -66,6 +66,212 @@ if (window.hljs && document.readyState && document.readyState === "complete") {
 <h2>Data</h2>
 <p>The training data for this project are available here: <a href="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv">https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv</a> The test data are available here: <a href="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv">https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv</a></p>
 <p>The data for this project come from this source: <a href="http://groupware.les.inf.puc-rio.br/har">http://groupware.les.inf.puc-rio.br/har</a>.</p>
+<pre class="r"><code>#library(knitr)
+# check if a data folder exists; if not then create one
+if (!file.exists(&quot;data&quot;)) {dir.create(&quot;data&quot;)}
+
+# file URL and destination file
+trainingUrl &lt;- &quot;https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv&quot;
+testingUrl &lt;- &quot;https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv&quot;
+
+# download the files
+if (!file.exists(&quot;./data/pml-training.csv&quot;)){
+    download.file(trainingUrl, destfile = &quot;./data/pml-training.csv&quot;)
+    }
+if (!file.exists(&quot;./data/pml-testing.csv&quot;)){
+    download.file(testingUrl, destfile = &quot;./data/pml-testing.csv&quot;)
+    }
+
+# reading the data
+# thanks go to the forum contributors in the following thread:
+# https://class.coursera.org/predmachlearn-011/forum/thread?thread_id=118
+train  &lt;- read.csv(&quot;./data/pml-training.csv&quot;, header=TRUE, na.strings = c(&quot;&quot;, &quot; &quot;,&quot;NA&quot;))
+test  &lt;- read.csv(&quot;./data/pml-testing.csv&quot;, header=TRUE, na.strings = c(&quot;&quot;, &quot; &quot;,&quot;NA&quot;))</code></pre>
+</div>
+<div id="cleaning-the-data" class="section level2">
+<h2>Cleaning the data</h2>
+<p>A brief visual inspection of the column names reveals that the first seven columns are irrelevant for the modelling. All column names in both datasets are equal except the last column. We extract only the columns with direct measurements (‘accel’, ‘magnet’ and ‘gyros’ in their names). Since columns with ‘var’ in their names contain only ‘NA’, they are also discarded.</p>
+<pre class="r"><code>namestrain &lt;- colnames(train)
+namestest &lt;- colnames(test)
+which(namestest!=namestrain)</code></pre>
+<pre><code>## [1] 160</code></pre>
+<pre class="r"><code>varind &lt;- grepl('var',namestrain)
+accind &lt;- grepl('acc',namestrain)
+gyroind &lt;- grepl('gyro',namestrain)
+magind &lt;- grepl('magnet',namestrain)
+trainMeasured &lt;- cbind(classe = train$classe,train[,(accind|gyroind|magind)&amp;!varind])
+testMeasured &lt;- cbind(pid = test$problem_id,test[,(accind|gyroind|magind)&amp;!varind])
+names(trainMeasured)</code></pre>
+<pre><code>##  [1] &quot;classe&quot;               &quot;total_accel_belt&quot;     &quot;gyros_belt_x&quot;        
+##  [4] &quot;gyros_belt_y&quot;         &quot;gyros_belt_z&quot;         &quot;accel_belt_x&quot;        
+##  [7] &quot;accel_belt_y&quot;         &quot;accel_belt_z&quot;         &quot;magnet_belt_x&quot;       
+## [10] &quot;magnet_belt_y&quot;        &quot;magnet_belt_z&quot;        &quot;total_accel_arm&quot;     
+## [13] &quot;gyros_arm_x&quot;          &quot;gyros_arm_y&quot;          &quot;gyros_arm_z&quot;         
+## [16] &quot;accel_arm_x&quot;          &quot;accel_arm_y&quot;          &quot;accel_arm_z&quot;         
+## [19] &quot;magnet_arm_x&quot;         &quot;magnet_arm_y&quot;         &quot;magnet_arm_z&quot;        
+## [22] &quot;total_accel_dumbbell&quot; &quot;gyros_dumbbell_x&quot;     &quot;gyros_dumbbell_y&quot;    
+## [25] &quot;gyros_dumbbell_z&quot;     &quot;accel_dumbbell_x&quot;     &quot;accel_dumbbell_y&quot;    
+## [28] &quot;accel_dumbbell_z&quot;     &quot;magnet_dumbbell_x&quot;    &quot;magnet_dumbbell_y&quot;   
+## [31] &quot;magnet_dumbbell_z&quot;    &quot;total_accel_forearm&quot;  &quot;gyros_forearm_x&quot;     
+## [34] &quot;gyros_forearm_y&quot;      &quot;gyros_forearm_z&quot;      &quot;accel_forearm_x&quot;     
+## [37] &quot;accel_forearm_y&quot;      &quot;accel_forearm_z&quot;      &quot;magnet_forearm_x&quot;    
+## [40] &quot;magnet_forearm_y&quot;     &quot;magnet_forearm_z&quot;</code></pre>
+</div>
+<div id="model-fitting" class="section level2">
+<h2>Model fitting</h2>
+<p>Since the testing dataset includes only 20 observations, we can use the larger dataset to train and crossvalidate the model, whereas the smaller one will be used for the final verification only. We use two methods: decision trees and random forest with default parameters.</p>
+<pre class="r"><code># split the cleaned testing data into training and cross validation
+library(caret)</code></pre>
+<pre><code>## Loading required package: lattice
+## Loading required package: ggplot2</code></pre>
+<pre class="r"><code>indTrain &lt;- createDataPartition(y = trainMeasured$classe, p = 0.6, list = FALSE)
+training &lt;- trainMeasured[indTrain, ]
+crossval &lt;- trainMeasured[-indTrain, ]
+
+# fit a randomForest model 
+library(randomForest)</code></pre>
+<pre><code>## randomForest 4.6-10
+## Type rfNews() to see new features/changes/bug fixes.</code></pre>
+<pre class="r"><code>rfmodel &lt;- randomForest(classe ~ ., data = training) #, preProcess=c(&quot;center&quot;, &quot;scale&quot;)
+rfmodel</code></pre>
+<pre><code>## 
+## Call:
+##  randomForest(formula = classe ~ ., data = training) 
+##                Type of random forest: classification
+##                      Number of trees: 500
+## No. of variables tried at each split: 6
+## 
+##         OOB estimate of  error rate: 1.58%
+## Confusion matrix:
+##      A    B    C    D    E class.error
+## A 3335    5    2    5    1 0.003882915
+## B   39 2215   23    2    0 0.028082492
+## C    2   27 2025    0    0 0.014118793
+## D    7    1   54 1861    7 0.035751295
+## E    0    3    3    5 2154 0.005080831</code></pre>
+<pre class="r"><code>rfpredictions &lt;- predict(rfmodel, crossval, type = &quot;class&quot;)
+confusionMatrix(rfpredictions, crossval$classe)</code></pre>
+<pre><code>## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction    A    B    C    D    E
+##          A 2225   30    1    3    0
+##          B    4 1474   30    0    0
+##          C    0   13 1335   29    1
+##          D    2    1    2 1249    4
+##          E    1    0    0    5 1437
+## 
+## Overall Statistics
+##                                           
+##                Accuracy : 0.9839          
+##                  95% CI : (0.9809, 0.9866)
+##     No Information Rate : 0.2845          
+##     P-Value [Acc &gt; NIR] : &lt; 2.2e-16       
+##                                           
+##                   Kappa : 0.9797          
+##  Mcnemar's Test P-Value : NA              
+## 
+## Statistics by Class:
+## 
+##                      Class: A Class: B Class: C Class: D Class: E
+## Sensitivity            0.9969   0.9710   0.9759   0.9712   0.9965
+## Specificity            0.9939   0.9946   0.9934   0.9986   0.9991
+## Pos Pred Value         0.9849   0.9775   0.9688   0.9928   0.9958
+## Neg Pred Value         0.9987   0.9931   0.9949   0.9944   0.9992
+## Prevalence             0.2845   0.1935   0.1744   0.1639   0.1838
+## Detection Rate         0.2836   0.1879   0.1702   0.1592   0.1832
+## Detection Prevalence   0.2879   0.1922   0.1756   0.1603   0.1839
+## Balanced Accuracy      0.9954   0.9828   0.9846   0.9849   0.9978</code></pre>
+<pre class="r"><code># decision tree model
+library(rpart)
+dtmodel &lt;- rpart(classe ~ ., data=training, method = &quot;class&quot;)
+dtmodel</code></pre>
+<pre><code>## n= 11776 
+## 
+## node), split, n, loss, yval, (yprob)
+##       * denotes terminal node
+## 
+##   1) root 11776 8428 A (0.28 0.19 0.17 0.16 0.18)  
+##     2) accel_belt_z&gt;=-187.5 11129 7785 A (0.3 0.2 0.18 0.17 0.14)  
+##       4) magnet_dumbbell_y&lt; 422.5 9281 6022 A (0.35 0.16 0.21 0.17 0.11)  
+##         8) accel_arm_x&lt; -270.5 1627  493 A (0.7 0.055 0.16 0.037 0.05)  
+##          16) magnet_forearm_x&gt;=-48.5 918   48 A (0.95 0.0087 0.025 0.0098 0.0087) *
+##          17) magnet_forearm_x&lt; -48.5 709  445 A (0.37 0.12 0.33 0.073 0.1)  
+##            34) magnet_dumbbell_z&lt; -18.5 267   44 A (0.84 0.082 0.015 0.0075 0.06) *
+##            35) magnet_dumbbell_z&gt;=-18.5 442  209 C (0.093 0.14 0.53 0.11 0.13) *
+##         9) accel_arm_x&gt;=-270.5 7654 5529 A (0.28 0.18 0.22 0.19 0.13)  
+##          18) accel_dumbbell_y&gt;=-34.5 6641 4553 A (0.31 0.16 0.19 0.21 0.12)  
+##            36) magnet_dumbbell_z&lt; -14.5 2040  974 A (0.52 0.15 0.11 0.17 0.042) *
+##            37) magnet_dumbbell_z&gt;=-14.5 4601 3531 D (0.22 0.17 0.22 0.23 0.16)  
+##              74) magnet_arm_z&gt;=582.5 864  381 A (0.56 0.079 0.15 0.16 0.053) *
+##              75) magnet_arm_z&lt; 582.5 3737 2805 D (0.14 0.19 0.23 0.25 0.18)  
+##               150) magnet_dumbbell_y&lt; 290.5 1777 1069 C (0.14 0.17 0.4 0.14 0.15)  
+##                 300) magnet_dumbbell_x&gt;=-457 362  208 A (0.43 0.19 0.05 0.097 0.24) *
+##                 301) magnet_dumbbell_x&lt; -457 1415  725 C (0.068 0.16 0.49 0.15 0.13) *
+##               151) magnet_dumbbell_y&gt;=290.5 1960 1278 D (0.15 0.21 0.084 0.35 0.21)  
+##                 302) magnet_dumbbell_x&gt;=-62 136    5 B (0.037 0.96 0 0 0) *
+##                 303) magnet_dumbbell_x&lt; -62 1824 1142 D (0.16 0.16 0.09 0.37 0.22)  
+##                   606) accel_forearm_x&gt;=-80.5 936  628 E (0.16 0.18 0.14 0.18 0.33) *
+##                   607) accel_forearm_x&lt; -80.5 888  375 D (0.15 0.13 0.033 0.58 0.11) *
+##          19) accel_dumbbell_y&lt; -34.5 1013  536 C (0.037 0.27 0.47 0.074 0.15)  
+##            38) magnet_dumbbell_z&lt; -36.5 444  223 B (0.045 0.5 0.13 0.13 0.2) *
+##            39) magnet_dumbbell_z&gt;=-36.5 569  150 C (0.03 0.086 0.74 0.032 0.12) *
+##       5) magnet_dumbbell_y&gt;=422.5 1848 1020 B (0.046 0.45 0.047 0.2 0.25)  
+##        10) total_accel_dumbbell&gt;=5.5 1336  584 B (0.064 0.56 0.064 0.037 0.27)  
+##          20) gyros_belt_z&gt;=-0.29 1211  459 B (0.07 0.62 0.07 0.041 0.2) *
+##          21) gyros_belt_z&lt; -0.29 125    0 E (0 0 0 0 1) *
+##        11) total_accel_dumbbell&lt; 5.5 512  185 D (0 0.15 0.0039 0.64 0.21) *
+##     3) accel_belt_z&lt; -187.5 647    4 E (0.0062 0 0 0 0.99) *</code></pre>
+<pre class="r"><code>dtpredictions &lt;- predict(dtmodel, crossval, type = &quot;class&quot;)
+confusionMatrix(dtpredictions, crossval$classe)</code></pre>
+<pre><code>## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction    A    B    C    D    E
+##          A 1806  345  286  360  189
+##          B   84  723  103   59  237
+##          C  111  187  879  196  221
+##          D   83  128   27  568  120
+##          E  148  135   73  103  675
+## 
+## Overall Statistics
+##                                           
+##                Accuracy : 0.5928          
+##                  95% CI : (0.5818, 0.6037)
+##     No Information Rate : 0.2845          
+##     P-Value [Acc &gt; NIR] : &lt; 2.2e-16       
+##                                           
+##                   Kappa : 0.4784          
+##  Mcnemar's Test P-Value : &lt; 2.2e-16       
+## 
+## Statistics by Class:
+## 
+##                      Class: A Class: B Class: C Class: D Class: E
+## Sensitivity            0.8091  0.47628   0.6425  0.44168  0.46810
+## Specificity            0.7898  0.92367   0.8896  0.94543  0.92833
+## Pos Pred Value         0.6048  0.59950   0.5514  0.61339  0.59524
+## Neg Pred Value         0.9123  0.88027   0.9218  0.89624  0.88573
+## Prevalence             0.2845  0.19347   0.1744  0.16391  0.18379
+## Detection Rate         0.2302  0.09215   0.1120  0.07239  0.08603
+## Detection Prevalence   0.3806  0.15371   0.2032  0.11802  0.14453
+## Balanced Accuracy      0.7995  0.69998   0.7661  0.69355  0.69821</code></pre>
+<p>The random forest model is clearly better (higher accuracy, smaller out of sample error) than the decision tree model.</p>
+<p>Now we can verify it using the original test dataset:</p>
+<pre class="r"><code>verif &lt;- predict(rfmodel, testMeasured, type = &quot;class&quot;)
+verif</code></pre>
+<pre><code>##  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 
+##  B  A  B  A  A  E  D  B  A  A  B  C  B  A  E  E  A  B  B  B 
+## Levels: A B C D E</code></pre>
+<pre class="r"><code>pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0(&quot;problem_id_&quot;,i,&quot;.txt&quot;)
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(verif)</code></pre>
+<p>All predicted values are correct.</p>
 </div>
 
 
